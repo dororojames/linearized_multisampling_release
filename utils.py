@@ -1,3 +1,5 @@
+import colorsys
+
 import numpy as np
 import torch
 
@@ -70,3 +72,11 @@ def angle_between(v1, v2):
     v1_u = unit_vector(v1)
     v2_u = unit_vector(v2)
     return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+
+
+def angle_to_color(angle):
+    red_hue, _, _ = colorsys.rgb_to_hsv(1, 0, 0)
+    green_hue, _, _ = colorsys.rgb_to_hsv(0, 1, 0)
+    cur_hue = np.interp(angle, (0, np.pi), (green_hue, red_hue))
+    cur_color = colorsys.hsv_to_rgb(cur_hue, 1, 1)
+    return cur_color

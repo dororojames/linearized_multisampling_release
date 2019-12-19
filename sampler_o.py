@@ -11,7 +11,8 @@ import torch
 ######### Utils to minimize dependencies #########
 # Move utils to another file if you want
 def print_notification(content_list, notification_type='NOTIFICATION'):
-    print('---------------------- {0} ----------------------'.format(notification_type))
+    print(
+        '---------------------- {0} ----------------------'.format(notification_type))
     print()
     for content in content_list:
         print(content)
@@ -55,15 +56,24 @@ def mat_3x3_inv(mat):
     inv_det = 1.0 / det
 
     mat_inv = torch.zeros(mat.shape, device=mat.device)
-    mat_inv[:, 0, 0] = (mat[:, 1, 1] * mat[:, 2, 2] - mat[:, 2, 1] * mat[:, 1, 2]) * inv_det
-    mat_inv[:, 0, 1] = (mat[:, 0, 2] * mat[:, 2, 1] - mat[:, 0, 1] * mat[:, 2, 2]) * inv_det
-    mat_inv[:, 0, 2] = (mat[:, 0, 1] * mat[:, 1, 2] - mat[:, 0, 2] * mat[:, 1, 1]) * inv_det
-    mat_inv[:, 1, 0] = (mat[:, 1, 2] * mat[:, 2, 0] - mat[:, 1, 0] * mat[:, 2, 2]) * inv_det
-    mat_inv[:, 1, 1] = (mat[:, 0, 0] * mat[:, 2, 2] - mat[:, 0, 2] * mat[:, 2, 0]) * inv_det
-    mat_inv[:, 1, 2] = (mat[:, 1, 0] * mat[:, 0, 2] - mat[:, 0, 0] * mat[:, 1, 2]) * inv_det
-    mat_inv[:, 2, 0] = (mat[:, 1, 0] * mat[:, 2, 1] - mat[:, 2, 0] * mat[:, 1, 1]) * inv_det
-    mat_inv[:, 2, 1] = (mat[:, 2, 0] * mat[:, 0, 1] - mat[:, 0, 0] * mat[:, 2, 1]) * inv_det
-    mat_inv[:, 2, 2] = (mat[:, 0, 0] * mat[:, 1, 1] - mat[:, 1, 0] * mat[:, 0, 1]) * inv_det
+    mat_inv[:, 0, 0] = (mat[:, 1, 1] * mat[:, 2, 2] -
+                        mat[:, 2, 1] * mat[:, 1, 2]) * inv_det
+    mat_inv[:, 0, 1] = (mat[:, 0, 2] * mat[:, 2, 1] -
+                        mat[:, 0, 1] * mat[:, 2, 2]) * inv_det
+    mat_inv[:, 0, 2] = (mat[:, 0, 1] * mat[:, 1, 2] -
+                        mat[:, 0, 2] * mat[:, 1, 1]) * inv_det
+    mat_inv[:, 1, 0] = (mat[:, 1, 2] * mat[:, 2, 0] -
+                        mat[:, 1, 0] * mat[:, 2, 2]) * inv_det
+    mat_inv[:, 1, 1] = (mat[:, 0, 0] * mat[:, 2, 2] -
+                        mat[:, 0, 2] * mat[:, 2, 0]) * inv_det
+    mat_inv[:, 1, 2] = (mat[:, 1, 0] * mat[:, 0, 2] -
+                        mat[:, 0, 0] * mat[:, 1, 2]) * inv_det
+    mat_inv[:, 2, 0] = (mat[:, 1, 0] * mat[:, 2, 1] -
+                        mat[:, 2, 0] * mat[:, 1, 1]) * inv_det
+    mat_inv[:, 2, 1] = (mat[:, 2, 0] * mat[:, 0, 1] -
+                        mat[:, 0, 0] * mat[:, 2, 1]) * inv_det
+    mat_inv[:, 2, 2] = (mat[:, 0, 0] * mat[:, 1, 1] -
+                        mat[:, 1, 0] * mat[:, 0, 1]) * inv_det
 
     # Divide the maximum value once more
     mat_inv = mat_inv / max_vals
@@ -80,7 +90,8 @@ def mat_3x3_det(mat):
 
     det = mat[:, 0, 0] * (mat[:, 1, 1] * mat[:, 2, 2] - mat[:, 2, 1] * mat[:, 1, 2]) \
         - mat[:, 0, 1] * (mat[:, 1, 0] * mat[:, 2, 2] - mat[:, 1, 2] * mat[:, 2, 0]) \
-        + mat[:, 0, 2] * (mat[:, 1, 0] * mat[:, 2, 1] - mat[:, 1, 1] * mat[:, 2, 0])
+        + mat[:, 0, 2] * (mat[:, 1, 0] * mat[:, 2, 1] -
+                          mat[:, 1, 1] * mat[:, 2, 0])
     return det
 
 
@@ -94,7 +105,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     if mode == 'linearized':
         return LinearizedMutilSampler.linearized_grid_sample(input, grid, padding_mode)
     else:
-        return torch.nn.functional.grid_sample(input, grid, mode, padding_mode)
+        return torch.nn.functional.grid_sample(input, grid, mode, padding_mode, align_corners=True)
 
 
 class LinearizedMutilSampler():
@@ -113,7 +124,8 @@ class LinearizedMutilSampler():
         cls.need_push_away = opt.need_push_away
         cls.fixed_bias = opt.fixed_bias
         if cls.is_hyperparameters_set:
-            raise RuntimeError('Trying to reset the hyperparamter for linearized multi sampler, currently not allowed')
+            raise RuntimeError(
+                'Trying to reset the hyperparamter for linearized multi sampler, currently not allowed')
         else:
             cls.is_hyperparameters_set = True
         notification = []
@@ -127,21 +139,27 @@ class LinearizedMutilSampler():
     @classmethod
     def linearized_grid_sample(cls, input, grid, padding_mode):
         # assert cls.is_hyperparameters_set, 'linearized sampler hyperparameters are not set'
-        assert isinstance(input, torch.Tensor), 'cannot process data type: {0}'.format(type(input))
-        assert isinstance(grid, torch.Tensor), 'cannot process data type: {0}'.format(type(grid))
+        assert isinstance(
+            input, torch.Tensor), 'cannot process data type: {0}'.format(type(input))
+        assert isinstance(
+            grid, torch.Tensor), 'cannot process data type: {0}'.format(type(grid))
 
         batch_size, source_channels, source_height, source_width = input.shape
-        least_offset = torch.tensor([2.0 / source_width, 2.0 / source_height], device=grid.device)
+        least_offset = torch.tensor(
+            [2.0 / source_width, 2.0 / source_height], device=grid.device)
         auxiliary_grid = cls.create_auxiliary_grid(grid, least_offset)
-        warped_input = cls.warp_input_with_auxiliary_grid(input, auxiliary_grid, padding_mode)
+        warped_input = cls.warp_input_with_auxiliary_grid(
+            input, auxiliary_grid, padding_mode)
         out = cls.linearized_fitting(warped_input, auxiliary_grid)
         return out
 
     @classmethod
     def linearized_fitting(cls, input, grid):
         def defensive_assert(input, grid):
-            assert len(input.shape) == 5, 'shape should be: B x Grid x C x H x W'
-            assert len(grid.shape) == 5, 'shape should be: B x Grid x H x W x XY'
+            assert len(
+                input.shape) == 5, 'shape should be: B x Grid x C x H x W'
+            assert len(
+                grid.shape) == 5, 'shape should be: B x Grid x H x W x XY'
             assert input.shape[0] == grid.shape[0]
             assert input.shape[1] == grid.shape[1]
             assert input.shape[1] > 1, 'num of grid should be larger than 1'
@@ -200,14 +218,17 @@ class LinearizedMutilSampler():
                                              dim=4).permute(0, 2, 3, 4, 1)
 
         # map to linearized, equation(2) in paper
-        image_linearized = torch.matmul(gradient_intensity_stop.transpose(3, 4), (center_grid_xyz - center_grid_xyz_stop))[..., 0].permute(0, 3, 1, 2) + center_image[:, 0]
+        image_linearized = torch.matmul(gradient_intensity_stop.transpose(
+            3, 4), (center_grid_xyz - center_grid_xyz_stop))[..., 0].permute(0, 3, 1, 2) + center_image[:, 0]
         return image_linearized
 
     @staticmethod
     def get_delta_vals(data_dict):
         def defensive_assert(center_image, other_image):
-            assert len(center_image.shape) == 5, 'shape should be: B x Grid x C x H x W'
-            assert len(other_image.shape) == 5, 'shape should be: B x Grid x C x H x W'
+            assert len(
+                center_image.shape) == 5, 'shape should be: B x Grid x C x H x W'
+            assert len(
+                other_image.shape) == 5, 'shape should be: B x Grid x C x H x W'
             assert center_image.shape[0] == other_image.shape[0]
             assert center_image.shape[1] == 1, 'num of center_image per single sample should be 1'
             assert other_image.shape[1] >= 1, ('num of other_image per single sample should be larger'
@@ -226,9 +247,11 @@ class LinearizedMutilSampler():
         center_grid_batch = center_grid.repeat([1, num_other_image, 1, 1, 1])
         delta_intensity = other_image - center_image_batch
         delta_grid = other_grid - center_grid_batch
-        delta_mask = (delta_grid[..., 0:1] >= -1.0) * (delta_grid[..., 0:1] <= 1.0) * (delta_grid[..., 1:2] >= -1.0) * (delta_grid[..., 1:2] <= 1.0)
+        delta_mask = (delta_grid[..., 0:1] >= -1.0) * (delta_grid[..., 0:1] <= 1.0) * (
+            delta_grid[..., 1:2] >= -1.0) * (delta_grid[..., 1:2] <= 1.0)
         delta_mask = delta_mask.float()
-        delta_grid = torch.cat([delta_grid, torch.ones(delta_grid[..., 0:1].shape, device=delta_grid.device)], dim=4)
+        delta_grid = torch.cat([delta_grid, torch.ones(
+            delta_grid[..., 0:1].shape, device=delta_grid.device)], dim=4)
         delta_grid *= delta_mask
         delta_vals = {'delta_intensity': delta_intensity,
                       'delta_grid': delta_grid,
@@ -246,14 +269,16 @@ class LinearizedMutilSampler():
         grid = grid.detach()
         input = input.repeat_interleave(num_grid, 0)
         warped_input = torch.nn.functional.grid_sample(input, grid, mode='bilinear',
-                                                       padding_mode=padding_mode)
-        warped_input = warped_input.reshape(batch_size, num_grid, -1, height, width)
+                                                       padding_mode=padding_mode, align_corners=True)
+        warped_input = warped_input.reshape(
+            batch_size, num_grid, -1, height, width)
         return warped_input
 
     @classmethod
     def create_auxiliary_grid(cls, grid, least_offset):
         batch_size, height, width, num_xy = grid.shape
-        grid = grid.repeat(1, cls.num_grid, 1, 1).reshape(batch_size, cls.num_grid, height, width, num_xy)
+        grid = grid.repeat(1, cls.num_grid, 1, 1).reshape(
+            batch_size, cls.num_grid, height, width, num_xy)
         grid = cls.add_noise_to_grid(grid, least_offset)
         return grid
 
@@ -265,7 +290,9 @@ class LinearizedMutilSampler():
         assert num_xy == cls.NUM_XY
         assert num_grid == cls.num_grid
 
-        grid_noise = torch.randn([batch_size, cls.num_grid - 1, height, width, num_xy], device=grid.device) / torch.tensor([[width, height]], dtype=torch.float32, device=grid.device) * cls.noise_strength
+        grid_noise = torch.randn([batch_size, cls.num_grid - 1, height, width, num_xy], device=grid.device) / \
+            torch.tensor([[width, height]], dtype=torch.float32,
+                         device=grid.device) * cls.noise_strength
         grid[:, 1:] += grid_noise
         if cls.need_push_away:
             grid = cls.push_away_samples(grid, least_offset)
@@ -284,3 +311,34 @@ class LinearizedMutilSampler():
         noise = noise * least_offset
         grid[:, 1:] = grid[:, 1:] + noise
         return grid
+
+
+class DifferentiableImageSampler():
+    '''a differentiable image sampler which works with theta'''
+
+    def __init__(self, sampling_mode, padding_mode):
+        self.sampling_mode = sampling_mode
+        self.padding_mode = padding_mode
+
+    def warp_image(self, image, theta, out_shape=None):
+        if image.dim() < 4:
+            image = image.unsqueeze(0)
+        if theta.dim() < 3:
+            theta = theta.unsqueeze(0)
+        assert image.size(0) == theta.size(
+            0), 'batch size of images do not match the batch size of theta'
+        if out_shape is None:
+            out_shape = image.size()[-2:]
+        out_shape = (image.size(0), 1, out_shape[-2], out_shape[-1])
+        # create grid for interpolation (in frame coordinates)
+        grid = torch.nn.functional.affine_grid(
+            theta, out_shape, align_corners=True)
+        # sample warped image
+        warped_img = grid_sample(
+            image, grid, mode=self.sampling_mode, padding_mode=self.padding_mode)
+
+        if has_nan(warped_img):
+            print('nan value in warped image! set to zeros')
+            warped_img[torch.isnan(warped_img)] = 0
+
+        return warped_img
