@@ -83,10 +83,8 @@ class GradientVisualizer(object):
     def draw_gradient_grid(self, orig_image, image_warper):
         gradient_grid = self.get_gradient_grid(orig_image, image_warper)
 
-        _, ax = plt.subplots()
-        ax.axis('equal')
-        ax.set_xlim([-1.5, 1.5])
-        ax.set_ylim([-1.5, 1.5])
+        fig, ax = plt.subplots()
+        ax.axis('off')
         orig_image_show = utils.torch_img_to_np_img(orig_image)[0]
         ax.imshow(orig_image_show, extent=[-1, 1, -1, 1])
 

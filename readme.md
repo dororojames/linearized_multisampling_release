@@ -11,9 +11,11 @@ This implementation is based on Python3 and PyTorch.
 ### Gradient Visualize
 
 - sample with bilinear
+
 ![bilinear](https://github.com/dororojames/linearized_multisampling_release/blob/master/bilinear.png)
 
 - sample with linearized
+
 ![bilinear](https://github.com/dororojames/linearized_multisampling_release/blob/master/linearized.png)
 
 ### Tutorial
