@@ -2,46 +2,35 @@ import torch
 import torch.nn.functional as F
 
 
-######### Utils to minimize dependencies #########
-# Move utils to another file if you want
-
-def has_nan(x) -> bool:
-    '''
-    check whether x contains nan.
-    :param x: torch or numpy var.
-    :return: single bool, True -> x containing nan, False -> ok.
-    '''
-    return torch.isnan(x).any()
+def cat_grid_z(grid, fill_value: int = 1):
+    """concat z axis of grid at last dim , return shape (B, H, W, 3)"""
+    return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
 
 
-def set_nan_to_zero(input, name='input'):
-    if has_nan(input):
-        print('nan val in %s! set to zeros' % name)
-        nidx = torch.isnan(input)
-        return input.masked_fill(nidx, 0)
-    return input
-
-
-######### Linearized multi-sampling #########
 def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_push_away=True, fixed_bias=False, **kwargs):
     """Linearized multi-sampling
 
     Args:
         input (tensor): (B, C, H, W)
-        grid (tensor): (B, 3, 2)
+        grid (tensor): (B, H, W, 2)
         num_grid (int, optional): multisampling. Defaults to 8.
         noise_strength (float, optional): auxiliary noise. Defaults to 0.5.
         need_push_away (bool, optional): pushaway grid. Defaults to True.
         fixed_bias (bool, optional): Defaults to False.
+        others : as torch.nn.functional.grid_sample()
 
     Returns:
         tensor: linearized sampled input
+
+    Reference:
+        paper: https://arxiv.org/abs/1901.07124
+        github: https://github.com/vcg-uvic/linearized_multisampling_release
     """
     def create_auxiliary_grid(grid, inputWH):
         grid = grid.unsqueeze(1).repeat(1, num_grid, 1, 1, 1)
 
-        WH = grid.new_tensor([[grid.size(2), grid.size(2)]])
-        grid_noise = torch.randn_like(grid[:, 1:]) / WH * noise_strength
+        WH = grid.new_tensor([grid.size(-2), grid.size(-3)])
+        grid_noise = torch.randn_like(grid[:, 1:]) / (WH * noise_strength)
         grid[:, 1:] = grid[:, 1:] + grid_noise
         if need_push_away:
             least_offset = grid.new_tensor([2.0/inputWH[-1], 2.0/inputWH[-2]])
@@ -60,15 +49,12 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         warped_input = F.grid_sample(input, grid, mode='bilinear', **kwargs)
         return warped_input.reshape(B, num_grid, -1, H, W)
 
-    def cat_grid_z(grid, fill_value=1):
-        return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
-
     def linearized_fitting(input, grid):
         assert input.dim() == 5, 'shape should be: B x Grid x C x H x W'
         assert grid.dim() == 5, 'shape should be: B x Grid x H x W x XY'
         assert input.size(0) == grid.size(0)
         assert input.size(1) == grid.size(1)
-        assert input.size(1) > 1, 'num of grid should be larger than 1'
+        assert grid.size(1) > 1, 'num of grid should be larger than 1'
 
         center_image = input[:, 0]
         other_image = input[:, 1:]
@@ -78,25 +64,22 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         delta_intensity = other_image - center_image.unsqueeze(1)
         delta_grid = other_grid - center_grid.unsqueeze(1)
 
-        delta_mask = (delta_grid[..., 0:1] >= -1.0) * (delta_grid[..., 0:1] <= 1.0) * (
-            delta_grid[..., 1:2] >= -1.0) * (delta_grid[..., 1:2] <= 1.0)
-        delta_grid = cat_grid_z(delta_grid) * delta_mask.float()
-
-        # reshape to [B, H, W, Grid-1, XY1]
-        delta_grid = delta_grid.permute(0, 2, 3, 4, 1)
+        # concat z and reshape to [B, H, W, XY1, Grid-1]
+        x = cat_grid_z(delta_grid).permute(0, 2, 3, 4, 1)
         # calculate dI/dX, euqation(7) in paper
-        xTx = delta_grid.matmul(delta_grid.transpose(3, 4))
-        # take inverse
-        xTx_inv = xTx.view(-1, 3, 3).inverse().view(xTx.shape)
-        xTx_inv_xT = xTx_inv.matmul(delta_grid)  # [B, H, W, XY1, Grid-1]
+        xTx = x.matmul(x.transpose(3, 4))
+        xTx_inv = xTx.view(-1, 3, 3).inverse().view_as(xTx)
+        xTx_inv_xT = xTx_inv.matmul(x)  # [B, H, W, XY1, Grid-1]
+
+        # prevent manifestation from out-of-bound samples metion in section 6.1 in paper
+        dW, dH = delta_grid.abs().chunk(2, dim=-1)
+        delta_mask = ((dW <= 1.0) * (dH <= 1.0)).permute(0, 2, 3, 4, 1).float()
+        xTx_inv_xT = xTx_inv_xT * delta_mask
 
         # [B, Grid-1, C, H, W] reshape to [B, H, W, Grid-1, C]
         delta_intensity = delta_intensity.permute(0, 3, 4, 1, 2)
         # gradient_intensity shape: [B, H, W, XY1, C]
         gradient_intensity = xTx_inv_xT.matmul(delta_intensity)
-
-        gradient_intensity = set_nan_to_zero(
-            gradient_intensity, 'gradient_intensity')
 
         # stop gradient shape: [B, C, H, W, XY1]
         gradient_intensity = gradient_intensity.permute(0, 4, 1, 2, 3).detach()
@@ -110,8 +93,8 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
 
     auxiliary_grid = create_auxiliary_grid(grid, input.size()[-2:])
     warped_input = warp_input(input, auxiliary_grid)
-    out = linearized_fitting(warped_input, auxiliary_grid)
-    return out
+    linearized_input = linearized_fitting(warped_input, auxiliary_grid)
+    return linearized_input
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=True):
@@ -127,8 +110,6 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
     else:
         warped_img = F.grid_sample(
             input, grid, mode, padding_mode=padding_mode, align_corners=align_corners)
-
-    warped_img = set_nan_to_zero(warped_img, 'warped input')
 
     return warped_img
 
