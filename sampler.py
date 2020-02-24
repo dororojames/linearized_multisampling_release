@@ -2,11 +2,6 @@ import torch
 import torch.nn.functional as F
 
 
-def cat_grid_z(grid, fill_value: int = 1):
-    """concat z axis of grid at last dim , return shape (B, H, W, 3)"""
-    return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
-
-
 def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_push_away=True, fixed_bias=False, **kwargs):
     """Linearized multi-sampling
 
@@ -48,6 +43,10 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         grid = grid.flatten(0, 1).detach()
         warped_input = F.grid_sample(input, grid, mode='bilinear', **kwargs)
         return warped_input.reshape(B, num_grid, -1, H, W)
+
+    def cat_grid_z(grid, fill_value: int = 1):
+        """concat z axis of grid at last dim , return shape (B, H, W, 3)"""
+        return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
 
     def linearized_fitting(input, grid):
         assert input.dim() == 5, 'shape should be: B x Grid x C x H x W'

@@ -8,20 +8,22 @@ This repository is a reference implementation for "Linearized Multi-Sampling for
 
 This implementation is based on Python3 and PyTorch.
 
-You can install the environment by: ```conda env create -f environment.yml```
+### Gradient Visualize
 
-Activate the env by: ```conda activate linearized```
+- sample with bilinear
+![bilinear](https://github.com/dororojames/linearized_multisampling_release/blob/master/bilinear.png)
+
+- sample with linearized
+![bilinear](https://github.com/dororojames/linearized_multisampling_release/blob/master/linearized.png)
 
 ### Tutorial
 
-A tutorial is in `linearized sampler tutorial.ipynb` . We built the method to have the same function prototype as `torch.nn.functional.grid_sample`, so you can replace bilinear sampling with linearized multi-sampling with minimum modification.
+A tutorial is in `main.py` . We built the method to have the same function prototype as `torch.nn.functional.grid_sample`, so you can replace bilinear sampling with linearized multi-sampling with minimum modification.
 
 ### Direct plug-in
 
-Copy `./warp/linearized.py` to your project folder, and replace `torch.nn.functional.grid_sample` in your code with `linearized.grid_sample`. 
-
-We made `linearize.py` to have minimum dependencies(PyTorch only), so we put some extra utils methods in that file. You can move those utils methods to another place to make it cleaner.
+Copy `sampler.py` to your project folder, and replace `torch.nn.functional.grid_sample` in your code with `sampler.grid_sample`.
 
 ### Notes
 
-If you find linearized multi-sampling useful in you project, please feel free to let us know by leaving an issue on this git repository or sending an email to jiangwei@uvic.ca.
+If you find linearized multi-sampling useful in you project, please feel free to let us know by leaving an issue on this git repository or sending an email to dororojames.cs07g@nctu.edu.tw.
