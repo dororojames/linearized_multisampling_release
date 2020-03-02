@@ -2,6 +2,11 @@ import torch
 import torch.nn.functional as F
 
 
+def cat_grid_z(grid, fill_value: int = 1):
+    """concat z axis of grid at last dim , return shape (B, H, W, 3)"""
+    return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
+
+
 def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_push_away=True, fixed_bias=False, **kwargs):
     """Linearized multi-sampling
 
@@ -21,44 +26,42 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         paper: https://arxiv.org/abs/1901.07124
         github: https://github.com/vcg-uvic/linearized_multisampling_release
     """
-    def create_auxiliary_grid(grid, inputWH):
-        grid = grid.unsqueeze(1).repeat(1, num_grid, 1, 1, 1)
+    def create_auxiliary_grid(grid):
+        grid = grid.unsqueeze(1)
+        other_grid = grid.repeat(1, num_grid-1, 1, 1, 1)
 
         WH = grid.new_tensor([grid.size(-2), grid.size(-3)])
-        grid_noise = torch.randn_like(grid[:, 1:]) / (WH * noise_strength)
-        grid[:, 1:] = grid[:, 1:] + grid_noise
+        grid_noise = torch.randn_like(other_grid).div_(WH.mul_(noise_strength))
+
         if need_push_away:
-            least_offset = grid.new_tensor([2.0/inputWH[-1], 2.0/inputWH[-2]])
-            noise = torch.randn_like(grid[:, 1:]) * least_offset
-            grid[:, 1:] = grid[:, 1:] + noise
-        return grid
+            inputH, inputW = input.size()[-2:]
+            least_offset = grid.new_tensor([2.0/inputW, 2.0/inputH])
+            grid_noise += torch.randn_like(other_grid).mul_(least_offset)
 
-    def warp_input(input, grid):
+        grid_noise = grid_noise.clamp_(min=-1, max=1)
+        return torch.cat([grid, other_grid+grid_noise], dim=1)
+
+    def warp_input(input, auxiliary_grid):
         assert input.dim() == 4
-        assert grid.dim() == 5
-        assert input.size(0) == grid.size(0)
+        assert auxiliary_grid.dim() == 5
 
-        B, num_grid, H, W = grid.size()[:4]
-        input = input.repeat_interleave(num_grid, 0)
-        grid = grid.flatten(0, 1).detach()
-        warped_input = F.grid_sample(input, grid, mode='bilinear', **kwargs)
+        B, num_grid, H, W = auxiliary_grid.size()[:4]
+        inputs = input.unsqueeze(1).repeat(1, num_grid, 1, 1, 1).flatten(0, 1)
+        grids = auxiliary_grid.flatten(0, 1).detach()
+        warped_input = F.grid_sample(inputs, grids, mode='bilinear', **kwargs)
         return warped_input.reshape(B, num_grid, -1, H, W)
 
-    def cat_grid_z(grid, fill_value: int = 1):
-        """concat z axis of grid at last dim , return shape (B, H, W, 3)"""
-        return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
+    def linearized_fitting(warped_input, auxiliary_grid):
+        assert auxiliary_grid.size(
+            1) > 1, 'num of grid should be larger than 1'
+        assert warped_input.dim() == 5, 'shape should be: B x Grid x C x H x W'
+        assert auxiliary_grid.dim() == 5, 'shape should be: B x Grid x H x W x XY'
+        assert warped_input.size(1) == auxiliary_grid.size(1)
 
-    def linearized_fitting(input, grid):
-        assert input.dim() == 5, 'shape should be: B x Grid x C x H x W'
-        assert grid.dim() == 5, 'shape should be: B x Grid x H x W x XY'
-        assert input.size(0) == grid.size(0)
-        assert input.size(1) == grid.size(1)
-        assert grid.size(1) > 1, 'num of grid should be larger than 1'
-
-        center_image = input[:, 0]
-        other_image = input[:, 1:]
-        center_grid = grid[:, 0]
-        other_grid = grid[:, 1:]
+        center_image = warped_input[:, 0]
+        other_image = warped_input[:, 1:]
+        center_grid = auxiliary_grid[:, 0]
+        other_grid = auxiliary_grid[:, 1:]
 
         delta_intensity = other_image - center_image.unsqueeze(1)
         delta_grid = other_grid - center_grid.unsqueeze(1)
@@ -66,14 +69,14 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         # concat z and reshape to [B, H, W, XY1, Grid-1]
         x = cat_grid_z(delta_grid).permute(0, 2, 3, 4, 1)
         # calculate dI/dX, euqation(7) in paper
-        xTx = x.matmul(x.transpose(3, 4))
+        xTx = x.matmul(x.transpose(3, 4))  # [B, H, W, XY1, XY1]
         xTx_inv = xTx.view(-1, 3, 3).inverse().view_as(xTx)
         xTx_inv_xT = xTx_inv.matmul(x)  # [B, H, W, XY1, Grid-1]
 
-        # prevent manifestation from out-of-bound samples metion in section 6.1 in paper
-        dW, dH = delta_grid.abs().chunk(2, dim=-1)
-        delta_mask = ((dW <= 1.0) * (dH <= 1.0)).permute(0, 2, 3, 4, 1).float()
-        xTx_inv_xT = xTx_inv_xT * delta_mask
+        # # prevent manifestation from out-of-bound samples metion in section 6.1 in paper
+        # dW, dH = delta_grid.abs().chunk(2, dim=-1)
+        # delta_mask = ((dW <= 1.0) * (dH <= 1.0)).permute(0, 2, 3, 4, 1).float()
+        # xTx_inv_xT = xTx_inv_xT * delta_mask
 
         # [B, Grid-1, C, H, W] reshape to [B, H, W, Grid-1, C]
         delta_intensity = delta_intensity.permute(0, 3, 4, 1, 2)
@@ -90,22 +93,24 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         # map to linearized, equation(2) in paper
         return center_image + gradient_intensity.mul(gradient_grid.unsqueeze(1)).sum(-1)
 
-    auxiliary_grid = create_auxiliary_grid(grid, input.size()[-2:])
+    assert input.size(0) == grid.size(0)
+    auxiliary_grid = create_auxiliary_grid(grid)
     warped_input = warp_input(input, auxiliary_grid)
     linearized_input = linearized_fitting(warped_input, auxiliary_grid)
     return linearized_input
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=True):
-    '''
+    """
     original function prototype:
-    torch.nn.functional.grid_sample(input, grid, mode='bilinear', padding_mode='zeros')
+    torch.nn.functional.grid_sample(
+        input, grid, mode='bilinear', padding_mode='zeros', align_corners=True)
     copy from pytorch 1.3.0 source code
     add linearized_grid_sample
-    '''
+    """
     if mode == 'linearized':
         warped_img = linearized_grid_sample(
-            input, grid, padding_mode=padding_mode, align_corners=True)
+            input, grid, padding_mode=padding_mode, align_corners=align_corners)
     else:
         warped_img = F.grid_sample(
             input, grid, mode, padding_mode=padding_mode, align_corners=align_corners)

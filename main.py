@@ -2,7 +2,7 @@ import imageio
 import matplotlib.pyplot as plt
 import torch
 
-import gradient_visualizer
+from gradient_visualizer import GradientVisualizer
 import sampler
 import sampler_o
 import utils
@@ -48,19 +48,6 @@ print(linearized_transformed_image.shape)
 # plt.show()
 
 
-class FakeOptions():
-    pass
-
-
-opt = FakeOptions()
-opt.padding_mode = 'zeros'
-opt.grid_size = 10
-opt.optim_criterion = 'mse'
-opt.optim_lr = 1e-2
-opt.out_shape = [16, 16]
-
-gradient_visualizer_instance = gradient_visualizer.GradientVisualizer(opt)
-gradient_visualizer_instance.draw_gradient_grid(
-    cute_cat[None], bilinear_sampler)
-gradient_visualizer_instance.draw_gradient_grid(
-    cute_cat[None], linearized_sampler)
+gradient_visualizer = GradientVisualizer()
+gradient_visualizer.draw_gradient_grid(cute_cat, bilinear_sampler)
+gradient_visualizer.draw_gradient_grid(cute_cat, linearized_sampler)
