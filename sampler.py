@@ -72,7 +72,7 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         xTx_inv = xTx.view(-1, 3, 3).inverse().view_as(xTx)
         xTx_inv_xT = xTx_inv.matmul(x)  # [B, H, W, XY1, Grid-1]
 
-        # prevent manifestation from out-of-bound samples metion in section 6.1 in paper
+        # prevent manifestation from out-of-bound samples mentioned in section 6.1 of paper
         dW, dH = delta_grid.abs().chunk(2, dim=-1)
         delta_mask = ((dW <= 1.0) * (dH <= 1.0)).permute(0, 2, 3, 4, 1)
         xTx_inv_xT = xTx_inv_xT * delta_mask
