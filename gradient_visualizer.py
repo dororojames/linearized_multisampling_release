@@ -10,83 +10,69 @@ import utils
 class GradientVisualizer(object):
     """GradientVisualizer"""
 
-    def __init__(self, grid_size=10, criterion='mse', lr=1e-2, out_shape=[16, 16]):
+    def __init__(self, input, target, grid_size=10, criterion='mse', optimizer='SGD', lr=1e-2):
+        assert input.dim() == target.dim() == 4
+        self.input = input
+        self.target = target
+        self.out_shape = list(target.size()[-2:])
         self.grid_size = grid_size
-        self.criterion = criterion
-        self.lr = lr
-        self.out_shape = out_shape
 
-    def create_translation_grid(self, resolution=None):
-        if resolution is None:
-            resolution = self.grid_size
-        y_steps, x_steps = torch.meshgrid(torch.linspace(-1, 1, steps=resolution),
-                                          torch.linspace(-1, 1, steps=resolution))
+        if criterion == 'l1':
+            self.criterion = F.l1_loss
+        elif criterion in ['mse', 'l2']:
+            self.criterion = F.mse_loss
+        else:
+            raise ValueError('unknown optimization criterion: %s' % criterion)
+        if optimizer == 'SGD':
+            self.optimizer = torch.optim.SGD
+        elif optimizer == 'Adam':
+            self.optimizer = torch.optim.Adam
+        self.lr = lr
+
+    def create_translation_grid(self):
+        y_steps, x_steps = torch.meshgrid(torch.linspace(-1, 1, steps=self.grid_size),
+                                          torch.linspace(-1, 1, steps=self.grid_size))
         return torch.stack([x_steps, y_steps], dim=-1).view(-1, 1, 2)
 
-    def build_criterion(self):
-        if self.criterion == 'l1loss':
-            criterion = torch.nn.L1Loss()
-        elif self.criterion == 'mse':
-            criterion = torch.nn.MSELoss()
-        else:
-            raise ValueError('unknown optimization criterion: {0}'.format(
-                self.criterion))
-        return criterion
+    def get_updated_motion(self, motion, sampler):
+        motion = motion.clone().detach().requires_grad_(True)
+        optimizer = self.optimizer([motion], self.lr)
 
-    def build_gd_optimizer(self, params):
-        return torch.optim.SGD([params], lr=self.lr)
-
-    def get_next_translation_vec(self, ori_image, translation_vec, image_warper):
-        translation_vec = translation_vec.clone().detach().requires_grad_(True)
-        translation_mat = perturbation_helper.vec2mat_for_translation(
-            translation_vec)
-        criterion = self.build_criterion()
-        optimizer = self.build_gd_optimizer(params=translation_vec)
-
-        target = F.interpolate(
-            ori_image, size=self.out_shape, mode='bilinear', align_corners=True).detach()
-        warped_image = image_warper.warp_image(
-            ori_image, translation_mat, self.out_shape)
-
-        loss = criterion(warped_image, target)
         optimizer.zero_grad()
+        theta = perturbation_helper.vec2mat_for_translation(motion)
+        warped_image = sampler.warp_image(self.input, theta, self.out_shape)
+        loss = self.criterion(warped_image, self.target)
         loss.backward()
         optimizer.step()
-        return translation_vec
+        return motion
 
-    def get_gradient_over_translation_vec(self, ori_image, translation_vec, image_warper):
-        next_translation_vec = self.get_next_translation_vec(
-            ori_image, translation_vec, image_warper)
-        moving_dir = next_translation_vec - translation_vec
-        return moving_dir
+    def get_gradient_vec(self, motion, sampler):
+        updated_motion = self.get_updated_motion(motion, sampler)
+        gradient_vec = updated_motion - motion
+        return gradient_vec
 
-    def get_gradient_grid(self, ori_image, image_warper):
+    def get_gradient_grid(self, sampler):
         gradient_grid = []
-        translation_grid = self.create_translation_grid()
-        for translation_vec in translation_grid:
-            cur_gradient = self.get_gradient_over_translation_vec(
-                ori_image, translation_vec, image_warper)
-            gradient_pack = {
-                'translation_vec': translation_vec, 'gradient': cur_gradient}
-            gradient_grid.append(gradient_pack)
+        for motion in self.create_translation_grid():
+            gradient = self.get_gradient_vec(motion, sampler)
+            gradient_grid.append(dict(motion=motion, gradient=gradient))
         return gradient_grid
 
-    def draw_gradient_grid(self, ori_image, image_warper):
-        gradient_grid = self.get_gradient_grid(
-            ori_image.unsqueeze(0), image_warper)
+    def draw_gradient_grid(self, sampler, filename=None):
+        """draw_gradient_grid"""
+        gradient_grid = self.get_gradient_grid(sampler)
 
-        fig, ax = plt.subplots()
+        _, ax = plt.subplots()
         ax.axis('off')
-        ori_image_show = utils.torch_img_to_np_img(ori_image)
-        ax.imshow(ori_image_show, extent=[-1, 1, -1, 1])
+        ax.imshow(utils.torch_img_to_np_img(
+            self.input[0]), extent=[-1, 1, -1, 1])
 
         for gradient in gradient_grid:
             ori_point = np.zeros([2], dtype=np.float32)
-            base_loc = 0 - (gradient['translation_vec'])[0].data.cpu().numpy()
-            gradient_dir = (gradient['gradient'])[0].data.cpu().numpy()
+            base_loc = 0 - gradient['motion'][0].data.cpu().numpy()
+            gradient_dir = gradient['gradient'][0].data.cpu().numpy()
             gradient_dir = 0 - utils.unit_vector(gradient_dir)
-            gt_dir = ori_point - base_loc
-            gt_dir = utils.unit_vector(gt_dir)
+            gt_dir = utils.unit_vector(ori_point - base_loc)
 
             angle = utils.angle_between(gradient_dir, gt_dir)
             try:
@@ -97,5 +83,7 @@ class GradientVisualizer(object):
             ax.arrow(base_loc[0], base_loc[1], gradient_dir[0], gradient_dir[1],
                      head_width=0.05, head_length=0.1, color=cur_color)
         # plt.show()
-        plt.savefig('./%s.png' % image_warper.sampling_mode)
+        if filename is None:
+            filename = sampler.sampling_mode
+        plt.savefig('./%s.png' % filename)
         plt.close('all')

@@ -121,25 +121,25 @@ def gen_pert_for_similarity(opt, num_pert):
     return perturbation_vec
 
 
-def vec2mat(opt, vec):
+def vec2mat(vec):
     """covert a transformation vector to transformation matrix,
 
-    Arguments:
-
+    Args:
         vec -- [transformation vector: , shape: (B, n)], where n is the number of warping parameters
+
     Returns:
         mat -- [transformation matrix, shape: (B, 3, 3)]
     """
-    assert isinstance(
-        vec, torch.Tensor), 'cannot process data type: {0}'.format(type(vec))
+    assert torch.is_tensor(
+        vec), 'cannot process data type: {}'.format(type(vec))
     if vec.dim() == 1:
         vec = vec.unsqueeze(0)
     assert vec.dim() == 2
-    if opt.warp_type == 'translation':
+    if vec.size(1) == 2:
         transformation_mat = vec2mat_for_translation(vec)
-    elif opt.warp_type == 'trans+rot':
+    elif vec.size(1) == 3:
         transformation_mat = vec2mat_for_trans_rot(vec)
-    elif opt.warp_type == 'similarity':
+    elif vec.size(1) == 4:
         transformation_mat = vec2mat_for_similarity(vec)
     else:
         raise NotImplementedError('unknown warping method')
@@ -148,9 +148,9 @@ def vec2mat(opt, vec):
 
 def vec2mat_for_translation(vec):
     assert vec.size(1) == 2
-    _len = vec.size(0)
-    O = vec.new_zeros(_len)
-    I = vec.new_ones(_len)
+    B = vec.size(0)
+    O = vec.new_zeros(B)
+    I = vec.new_ones(B)
 
     dx, dy = torch.unbind(vec, dim=1)
     transformation_mat = torch.stack([torch.stack([I, O, dx], dim=-1),
@@ -160,46 +160,38 @@ def vec2mat_for_translation(vec):
 
 def vec2mat_for_trans_rot(vec):
     assert vec.size(1) == 3
-    _len = vec.size(0)
-    O = vec.new_zeros(_len)
-    I = vec.new_ones(_len)
+    B = vec.size(0)
+    O = vec.new_zeros(B)
+    I = vec.new_ones(B)
 
-    p1, p2, p3 = torch.unbind(vec, dim=1)
-    theta = p1
+    theta, dx, dy = vec.unbind(dim=1)
     cos = torch.cos(theta)
     sin = torch.sin(theta)
-    dx = p2
-    dy = p3
     R = torch.stack([torch.stack([cos, -sin, O], dim=-1),
                      torch.stack([sin, cos, O], dim=-1)], dim=1)
     S = torch.stack([torch.stack([I, O, O], dim=-1),
                      torch.stack([O, I, O], dim=-1)], dim=1)
     T = torch.stack([torch.stack([I, O, dx], dim=-1),
                      torch.stack([O, I, dy], dim=-1)], dim=1)
-    transformation_mat = torch.bmm(R, torch.bmm(S, T))
-
+    transformation_mat = R.bmm(S.bmm(T))
     return transformation_mat
 
 
 def vec2mat_for_similarity(vec):
     assert vec.size(1) == 4
-    _len = vec.size(0)
-    O = vec.new_zeros(_len)
-    I = vec.new_ones(_len)
+    B = vec.size(0)
+    O = vec.new_zeros(B)
+    I = vec.new_ones(B)
 
-    p1, p2, p3, p4 = torch.unbind(vec, dim=1)
-    theta = p1
+    theta, p2, dx, dy = vec.unbind(dim=1)
     cos = torch.cos(theta)
     sin = torch.sin(theta)
     s = 2.0 ** (p2)
-    dx = p3
-    dy = p4
     R = torch.stack([torch.stack([cos, -sin, O], dim=-1),
                      torch.stack([sin, cos, O], dim=-1)], dim=1)
     S = torch.stack([torch.stack([s, O, O], dim=-1),
                      torch.stack([O, s, O], dim=-1)], dim=1)
     T = torch.stack([torch.stack([I, O, dx], dim=-1),
                      torch.stack([O, I, dy], dim=-1)], dim=1)
-    transformation_mat = torch.bmm(R, torch.bmm(S, T))
-
+    transformation_mat = R.bmm(S.bmm(T))
     return transformation_mat

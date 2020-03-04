@@ -1,7 +1,10 @@
 import colorsys
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from torchvision.datasets.folder import default_loader as imgloader
+from torchvision.transforms.functional import to_tensor
 
 
 def embed_breakpoint(terminate=True):
@@ -17,6 +20,15 @@ def embed_breakpoint(terminate=True):
     return embedding
 
 
+def torchseed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def loadimage(path):
+    return to_tensor(imgloader(path))
+
+
 def torch_img_to_np_img(torch_img):
     '''convert a torch image to matplotlib-able numpy image
     torch use Channels x Height x Width
@@ -24,15 +36,25 @@ def torch_img_to_np_img(torch_img):
     Arguments:
         torch_img {[type]} -- [description]
     '''
-    assert isinstance(torch_img, torch.Tensor), 'cannot process data type: {0}'.format(type(torch_img))
-    if len(torch_img.shape) == 4 and (torch_img.shape[1] == 3 or torch_img.shape[1] == 1):
+    assert isinstance(
+        torch_img, torch.Tensor), 'cannot process data type: {0}'.format(type(torch_img))
+    if torch_img.dim() == 4 and (torch_img.size(1) == 3 or torch_img.size(1) == 1):
         return np.transpose(torch_img.detach().cpu().numpy(), (0, 2, 3, 1))
-    if len(torch_img.shape) == 3 and (torch_img.shape[0] == 3 or torch_img.shape[0] == 1):
+    if torch_img.dim() == 3 and (torch_img.size(0) == 3 or torch_img.size(0) == 1):
         return np.transpose(torch_img.detach().cpu().numpy(), (1, 2, 0))
-    elif len(torch_img.shape) == 2:
+    elif torch_img.dim() == 2:
         return torch_img.detach().cpu().numpy()
     else:
         raise ValueError('cannot process this image')
+
+
+def showimg(torch_img):
+    """convert torch image to np"""
+    if torch_img.dim() == 4:
+        torch_img = torch_img[0]
+    img = torch_img_to_np_img(torch_img.clamp(min=0, max=1))
+    plt.imshow(img)
+    plt.show()
 
 
 def np_img_to_torch_img(np_img):
@@ -43,7 +65,8 @@ def np_img_to_torch_img(np_img):
     Arguments:
         np_img {[type]} -- [description]
     """
-    assert isinstance(np_img, np.ndarray), 'cannot process data type: {0}'.format(type(np_img))
+    assert isinstance(
+        np_img, np.ndarray), 'cannot process data type: {0}'.format(type(np_img))
     if len(np_img.shape) == 4 and (np_img.shape[3] == 3 or np_img.shape[3] == 1):
         return torch.from_numpy(np.transpose(np_img, (0, 3, 1, 2)))
     if len(np_img.shape) == 3 and (np_img.shape[2] == 3 or np_img.shape[2] == 1):
@@ -51,7 +74,8 @@ def np_img_to_torch_img(np_img):
     elif len(np_img.shape) == 2:
         return torch.from_numpy(np_img)
     else:
-        raise ValueError('cannot process this image with shape: {0}'.format(np_img.shape))
+        raise ValueError(
+            'cannot process this image with shape: {0}'.format(np_img.shape))
 
 
 def unit_vector(vector):

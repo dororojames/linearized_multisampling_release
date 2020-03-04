@@ -31,15 +31,14 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         other_grid = grid.repeat(1, num_grid-1, 1, 1, 1)
 
         WH = grid.new_tensor([grid.size(-2), grid.size(-3)])
-        grid_noise = torch.randn_like(other_grid).div_(WH.mul_(noise_strength))
+        other_grid += torch.randn_like(other_grid) / WH * noise_strength
 
         if need_push_away:
             inputH, inputW = input.size()[-2:]
             least_offset = grid.new_tensor([2.0/inputW, 2.0/inputH])
-            grid_noise += torch.randn_like(other_grid).mul_(least_offset)
+            other_grid += torch.randn_like(other_grid) * least_offset
 
-        grid_noise = grid_noise.clamp_(min=-1, max=1)
-        return torch.cat([grid, other_grid+grid_noise], dim=1)
+        return torch.cat([grid, other_grid], dim=1)
 
     def warp_input(input, auxiliary_grid):
         assert input.dim() == 4
@@ -73,10 +72,10 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         xTx_inv = xTx.view(-1, 3, 3).inverse().view_as(xTx)
         xTx_inv_xT = xTx_inv.matmul(x)  # [B, H, W, XY1, Grid-1]
 
-        # # prevent manifestation from out-of-bound samples metion in section 6.1 in paper
-        # dW, dH = delta_grid.abs().chunk(2, dim=-1)
-        # delta_mask = ((dW <= 1.0) * (dH <= 1.0)).permute(0, 2, 3, 4, 1).float()
-        # xTx_inv_xT = xTx_inv_xT * delta_mask
+        # prevent manifestation from out-of-bound samples metion in section 6.1 in paper
+        dW, dH = delta_grid.abs().chunk(2, dim=-1)
+        delta_mask = ((dW <= 1.0) * (dH <= 1.0)).permute(0, 2, 3, 4, 1)
+        xTx_inv_xT = xTx_inv_xT * delta_mask
 
         # [B, Grid-1, C, H, W] reshape to [B, H, W, Grid-1, C]
         delta_intensity = delta_intensity.permute(0, 3, 4, 1, 2)
@@ -87,8 +86,8 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         gradient_intensity = gradient_intensity.permute(0, 4, 1, 2, 3).detach()
 
         # center_grid shape: [B, H, W, XY1]
-        grid_xyz_stop = cat_grid_z(center_grid, int(fixed_bias))
-        gradient_grid = cat_grid_z(center_grid) - grid_xyz_stop.detach()
+        grid_xyz_stop = cat_grid_z(center_grid.detach(), int(fixed_bias))
+        gradient_grid = cat_grid_z(center_grid) - grid_xyz_stop
 
         # map to linearized, equation(2) in paper
         return center_image + gradient_intensity.mul(gradient_grid.unsqueeze(1)).sum(-1)
@@ -118,10 +117,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
     return warped_img
 
 
-class DifferentiableImageSampler():
+class Sampler():
     '''a differentiable image sampler which works with theta'''
 
-    def __init__(self, sampling_mode, padding_mode):
+    def __init__(self, sampling_mode='linearized', padding_mode='border'):
         self.sampling_mode = sampling_mode
         self.padding_mode = padding_mode
 

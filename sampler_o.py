@@ -313,7 +313,7 @@ class LinearizedMutilSampler():
         return grid
 
 
-class DifferentiableImageSampler():
+class Sampler():
     '''a differentiable image sampler which works with theta'''
 
     def __init__(self, sampling_mode, padding_mode):
