@@ -31,14 +31,14 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_pus
         other_grid = grid.repeat(1, num_grid-1, 1, 1, 1)
 
         WH = grid.new_tensor([grid.size(-2), grid.size(-3)])
-        other_grid += torch.randn_like(other_grid) / WH * noise_strength
+        grid_noise = torch.randn_like(other_grid) / WH * noise_strength
 
         if need_push_away:
             inputH, inputW = input.size()[-2:]
             least_offset = grid.new_tensor([2.0/inputW, 2.0/inputH])
-            other_grid += torch.randn_like(other_grid) * least_offset
+            grid_noise += torch.randn_like(other_grid) * least_offset
 
-        return torch.cat([grid, other_grid], dim=1)
+        return torch.cat([grid, other_grid+grid_noise], dim=1)
 
     def warp_input(input, auxiliary_grid):
         assert input.dim() == 4
