@@ -7,7 +7,7 @@ def cat_grid_z(grid, fill_value: int = 1):
     return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
 
 
-def linearized_grid_sample(input, grid, num_grid=8, noise_strength=0.5, need_push_away=True, fixed_bias=False, **kwargs):
+def linearized_grid_sample(input, grid, num_grid=8, noise_strength=.5, need_push_away=True, fixed_bias=False, **kwargs):
     """Linearized multi-sampling
 
     Args:
@@ -109,7 +109,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
     """
     if mode == 'linearized':
         warped_img = linearized_grid_sample(
-            input, grid, padding_mode=padding_mode, align_corners=align_corners)
+            input, grid, padding_mode=padding_mode, align_corners=True)
     else:
         warped_img = F.grid_sample(
             input, grid, mode, padding_mode=padding_mode, align_corners=align_corners)

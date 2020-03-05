@@ -10,7 +10,13 @@ import utils
 class GradientVisualizer(object):
     """GradientVisualizer"""
 
-    def __init__(self, input, target, grid_size=10, criterion='mse', optimizer='SGD', lr=1e-2):
+    def __init__(self, input, target_mat, target_shape=None, grid_size=10, criterion='mse', optimizer='SGD', lr=1e-2):
+        target_shape = input.size() if target_shape is None else [
+            input.size(0), 1] + target_shape
+        target_grid = F.affine_grid(
+            target_mat, target_shape, align_corners=True)
+        target = F.grid_sample(
+            input, target_grid, mode='bilinear', align_corners=True)
         assert input.dim() == target.dim() == 4
         self.input = input
         self.target = target
@@ -67,6 +73,7 @@ class GradientVisualizer(object):
         ax.imshow(utils.torch_img_to_np_img(
             self.input[0]), extent=[-1, 1, -1, 1])
 
+        total_angle = 0
         for gradient in gradient_grid:
             ori_point = np.zeros([2], dtype=np.float32)
             base_loc = 0 - gradient['motion'][0].data.cpu().numpy()
@@ -75,6 +82,7 @@ class GradientVisualizer(object):
             gt_dir = utils.unit_vector(ori_point - base_loc)
 
             angle = utils.angle_between(gradient_dir, gt_dir)
+            total_angle += angle
             try:
                 cur_color = utils.angle_to_color(angle)
             except ValueError:
@@ -85,5 +93,6 @@ class GradientVisualizer(object):
         # plt.show()
         if filename is None:
             filename = sampler.sampling_mode
+        print(filename, angle/len(gradient_grid))
         plt.savefig('./%s.png' % filename)
         plt.close('all')
