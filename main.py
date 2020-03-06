@@ -1,7 +1,6 @@
 import torch
 from torchvision.utils import save_image
 
-import perturbation_helper
 import sampler
 import sampler_o
 import utils
@@ -19,7 +18,7 @@ if __name__ == "__main__":
     bilinear_sampler = sampler.Sampler('bilinear', 'zeros')
     bilinear_tarnsformed = bilinear_sampler.warp_image(
         cute_cat, trans_mat, out_shape=out_shape)
-    save_image(bilinear_tarnsformed, 'bilinear_transformed.png')
+    # save_image(bilinear_tarnsformed, 'bilinear_transformed.png')
     # utils.showimg(bilinear_tarnsformed)
 
     # utils.torchseed(666)
@@ -33,20 +32,21 @@ if __name__ == "__main__":
     linearized_sampler = sampler.Sampler('linearized', 'zeros')
     linearized_tarnsformed = linearized_sampler.warp_image(
         cute_cat, trans_mat, out_shape=out_shape)
-    save_image(linearized_tarnsformed, 'linearized_tarnsformed.png')
+    # save_image(linearized_tarnsformed, 'linearized_tarnsformed.png')
     # utils.showimg(linearized_tarnsformed)
 
     # print(linearized_tarnsformed_o.equal(linearized_tarnsformed))
 
-    # target_mo = torch.rand(1, 2)*2 - 1
-    # print(target_mo)
-    # target_mat = perturbation_helper.vec2mat_for_translation(target_mo)
-    target_mat = perturbation_helper.gen_identity_mat(1)
-    # target = bilinear_sampler.warp_image(cute_cat, target_mat)
+    print(sampler.LinearizedMutilSample.hyperparameters())
+    # sampler.LinearizedMutilSample.set_hyperparameters(noise_strength=2)
 
-    visualizer = GradientVisualizer(input=cute_cat, target_mat=target_mat, target_shape=[16,16])
+    # target_mo = torch.rand(1, 2)*2 - 1
+    # target_mo = torch.zeros(1, 2)
+    # print(target_mo)
+
+    visualizer = GradientVisualizer(input=cute_cat, out_shape=[16, 16])
     visualizer.draw_gradient_grid(bilinear_sampler)
     # utils.torchseed(666)
     # visualizer.draw_gradient_grid(linearized_sampler_o, 'linearized_ori')
-    # utils.torchseed(666)
+    utils.torchseed(666)
     visualizer.draw_gradient_grid(linearized_sampler)

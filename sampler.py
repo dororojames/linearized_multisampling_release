@@ -7,50 +7,56 @@ def cat_grid_z(grid, fill_value: int = 1):
     return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
 
 
-def linearized_grid_sample(input, grid, num_grid=8, noise_strength=.5, need_push_away=True, fixed_bias=False, **kwargs):
-    """Linearized multi-sampling
+class LinearizedMutilSample():
+    num_grid = 8
+    noise_strength = 0.5
+    need_push_away = True
+    fixed_bias = False
 
-    Args:
-        input (tensor): (B, C, H, W)
-        grid (tensor): (B, H, W, 2)
-        num_grid (int, optional): multisampling. Defaults to 8.
-        noise_strength (float, optional): auxiliary noise. Defaults to 0.5.
-        need_push_away (bool, optional): pushaway grid. Defaults to True.
-        fixed_bias (bool, optional): Defaults to False.
-        others : as torch.nn.functional.grid_sample()
+    @classmethod
+    def hyperparameters(cls):
+        return {'num_grid': cls.num_grid, 'noise_strength': cls.noise_strength,
+                'need_push_away': cls.need_push_away, 'fixed_bias': cls.fixed_bias}
 
-    Returns:
-        tensor: linearized sampled input
+    @classmethod
+    def set_hyperparameters(cls, **kwargs):
+        selfparams = cls.hyperparameters()
+        for key, item in kwargs.items():
+            if selfparams[key] != item:
+                setattr(cls, key, item)
+                print('Set Linearized Mutil Sample hyperparam:`%s` to %s' %
+                      (key, item))
 
-    Reference:
-        paper: https://arxiv.org/abs/1901.07124
-        github: https://github.com/vcg-uvic/linearized_multisampling_release
-    """
-    def create_auxiliary_grid(grid):
+    @classmethod
+    def create_auxiliary_grid(cls, grid, inputsize):
         grid = grid.unsqueeze(1)
-        other_grid = grid.repeat(1, num_grid-1, 1, 1, 1)
+        other_grid = grid.repeat(1, cls.num_grid-1, 1, 1, 1)
 
         WH = grid.new_tensor([grid.size(-2), grid.size(-3)])
-        grid_noise = torch.randn_like(other_grid) / WH * noise_strength
+        grid_noise = torch.randn_like(other_grid) / WH * cls.noise_strength
 
-        if need_push_away:
-            inputH, inputW = input.size()[-2:]
+        if cls.need_push_away:
+            inputH, inputW = inputsize[-2:]
             least_offset = grid.new_tensor([2.0/inputW, 2.0/inputH])
             grid_noise += torch.randn_like(other_grid) * least_offset
 
+        # grid_noise = grid_noise.clamp_(min=-1, max=1)
         return torch.cat([grid, other_grid+grid_noise], dim=1)
 
-    def warp_input(input, auxiliary_grid):
+    @classmethod
+    def warp_input(cls, input, auxiliary_grid, padding_mode='zeros'):
         assert input.dim() == 4
         assert auxiliary_grid.dim() == 5
 
         B, num_grid, H, W = auxiliary_grid.size()[:4]
         inputs = input.unsqueeze(1).repeat(1, num_grid, 1, 1, 1).flatten(0, 1)
         grids = auxiliary_grid.flatten(0, 1).detach()
-        warped_input = F.grid_sample(inputs, grids, mode='bilinear', **kwargs)
+        warped_input = F.grid_sample(inputs, grids, mode='bilinear',
+                                     padding_mode=padding_mode, align_corners=True)
         return warped_input.reshape(B, num_grid, -1, H, W)
 
-    def linearized_fitting(warped_input, auxiliary_grid):
+    @classmethod
+    def linearized_fitting(cls, warped_input, auxiliary_grid):
         assert auxiliary_grid.size(
             1) > 1, 'num of grid should be larger than 1'
         assert warped_input.dim() == 5, 'shape should be: B x Grid x C x H x W'
@@ -86,17 +92,45 @@ def linearized_grid_sample(input, grid, num_grid=8, noise_strength=.5, need_push
         gradient_intensity = gradient_intensity.permute(0, 4, 1, 2, 3).detach()
 
         # center_grid shape: [B, H, W, XY1]
-        grid_xyz_stop = cat_grid_z(center_grid.detach(), int(fixed_bias))
+        grid_xyz_stop = cat_grid_z(center_grid.detach(), int(cls.fixed_bias))
         gradient_grid = cat_grid_z(center_grid) - grid_xyz_stop
 
         # map to linearized, equation(2) in paper
         return center_image + gradient_intensity.mul(gradient_grid.unsqueeze(1)).sum(-1)
 
-    assert input.size(0) == grid.size(0)
-    auxiliary_grid = create_auxiliary_grid(grid)
-    warped_input = warp_input(input, auxiliary_grid)
-    linearized_input = linearized_fitting(warped_input, auxiliary_grid)
-    return linearized_input
+    @classmethod
+    def apply(cls, input, grid, padding_mode='zeros'):
+        assert input.size(0) == grid.size(0)
+        auxiliary_grid = cls.create_auxiliary_grid(grid, input.size())
+        warped_input = cls.warp_input(input, auxiliary_grid, padding_mode)
+        linearized_input = cls.linearized_fitting(warped_input, auxiliary_grid)
+        return linearized_input
+
+
+def linearized_grid_sample(input, grid, padding_mode='zeros',
+                           num_grid=8, noise_strength=.5, need_push_away=True, fixed_bias=False):
+    """Linearized multi-sampling
+
+    Args:
+        input (tensor): (B, C, H, W)
+        grid (tensor): (B, H, W, 2)
+        padding_mode (str): padding mode for outside grid values
+            ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
+        num_grid (int, optional): multisampling. Defaults to 8.
+        noise_strength (float, optional): auxiliary noise. Defaults to 0.5.
+        need_push_away (bool, optional): pushaway grid. Defaults to True.
+        fixed_bias (bool, optional): Defaults to False.
+
+    Returns:
+        tensor: linearized sampled input
+
+    Reference:
+        paper: https://arxiv.org/abs/1901.07124
+        github: https://github.com/vcg-uvic/linearized_multisampling_release
+    """
+    LinearizedMutilSample.set_hyperparameters(
+        num_grid=num_grid, noise_strength=noise_strength, need_push_away=need_push_away, fixed_bias=fixed_bias)
+    return LinearizedMutilSample.apply(input, grid, padding_mode)
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=True):
@@ -108,13 +142,36 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
     add linearized_grid_sample
     """
     if mode == 'linearized':
-        warped_img = linearized_grid_sample(
-            input, grid, padding_mode=padding_mode, align_corners=True)
+        warped_img = LinearizedMutilSample.apply(
+            input, grid, padding_mode=padding_mode)
     else:
         warped_img = F.grid_sample(
             input, grid, mode, padding_mode=padding_mode, align_corners=align_corners)
 
     return warped_img
+
+
+def meshgrid(size):
+    # type: (List[int]) -> Tensor
+    """return meshgrid (B, H, W, 2) of input size(width first, range (-1, -1)~(1, 1))"""
+    coordh, coordw = torch.meshgrid(torch.linspace(-1, 1, size[-2]),
+                                    torch.linspace(-1, 1, size[-1]))
+    return torch.stack([coordw, coordh], dim=2).repeat(size[0], 1, 1, 1)
+
+
+def homography_grid(matrix, size):
+    # type: (Tensor, List[int]) -> Tensor
+    grid = cat_grid_z(meshgrid(size).to(matrix.device))  # B, H, W, 3
+    homography = grid.flatten(1, 2).bmm(matrix.transpose(1, 2)).view_as(grid)
+    grid, ZwarpHom = homography.split([2, 1], dim=-1)
+    return grid / ZwarpHom.add(1e-8)
+
+
+def transform_to_grid(matrix, size):
+    if matrix.size(1) == 2:
+        return F.affine_grid(matrix, size, align_corners=True)
+    else:
+        return homography_grid(matrix, size)
 
 
 class Sampler():
@@ -135,6 +192,6 @@ class Sampler():
             out_shape = input.size()[-2:]
         out_shape = (input.size(0), 1, out_shape[-2], out_shape[-1])
         # create grid for interpolation (in frame coordinates)
-        grid = F.affine_grid(theta, out_shape, align_corners=True)
+        grid = transform_to_grid(theta, out_shape)
         # sample warped input
         return grid_sample(input, grid, self.sampling_mode, self.padding_mode)
