@@ -2,6 +2,62 @@ import torch
 import torch.nn.functional as F
 
 
+def mat_3x3_inv(mat):
+    '''
+    calculate the inverse of a 3x3 matrix, support batch.
+    :param mat: torch.Tensor -- [input matrix, shape: (B, 3, 3)]
+    :return: mat_inv: torch.Tensor -- [inversed matrix shape: (B, 3, 3)]
+    '''
+    if mat.dim() < 3:
+        mat = mat.unsqueeze(0)
+    assert mat.size(1) == mat.size(2) == 3
+
+    # Divide the matrix with it's maximum element
+    max_vals = mat.max(1, keepdim=True)[0].max(2, keepdim=True)[0]
+    mat = mat / max_vals
+
+    inv_det = 1.0 / mat_3x3_det(mat)
+
+    mat_inv = torch.zeros_like(mat)
+    mat_inv[:, 0, 0] = (mat[:, 1, 1] * mat[:, 2, 2] -
+                        mat[:, 2, 1] * mat[:, 1, 2]) * inv_det
+    mat_inv[:, 0, 1] = (mat[:, 0, 2] * mat[:, 2, 1] -
+                        mat[:, 0, 1] * mat[:, 2, 2]) * inv_det
+    mat_inv[:, 0, 2] = (mat[:, 0, 1] * mat[:, 1, 2] -
+                        mat[:, 0, 2] * mat[:, 1, 1]) * inv_det
+    mat_inv[:, 1, 0] = (mat[:, 1, 2] * mat[:, 2, 0] -
+                        mat[:, 1, 0] * mat[:, 2, 2]) * inv_det
+    mat_inv[:, 1, 1] = (mat[:, 0, 0] * mat[:, 2, 2] -
+                        mat[:, 0, 2] * mat[:, 2, 0]) * inv_det
+    mat_inv[:, 1, 2] = (mat[:, 1, 0] * mat[:, 0, 2] -
+                        mat[:, 0, 0] * mat[:, 1, 2]) * inv_det
+    mat_inv[:, 2, 0] = (mat[:, 1, 0] * mat[:, 2, 1] -
+                        mat[:, 2, 0] * mat[:, 1, 1]) * inv_det
+    mat_inv[:, 2, 1] = (mat[:, 2, 0] * mat[:, 0, 1] -
+                        mat[:, 0, 0] * mat[:, 2, 1]) * inv_det
+    mat_inv[:, 2, 2] = (mat[:, 0, 0] * mat[:, 1, 1] -
+                        mat[:, 1, 0] * mat[:, 0, 1]) * inv_det
+
+    # Divide the maximum value once more
+    mat_inv = mat_inv / max_vals
+    return mat_inv
+
+
+def mat_3x3_det(mat):
+    '''
+    calculate the determinant of a 3x3 matrix, support batch.
+    '''
+    if mat.dim() < 3:
+        mat = mat.unsqueeze(0)
+    assert mat.size(1) == mat.size(2) == 3
+
+    det = mat[:, 0, 0] * (mat[:, 1, 1] * mat[:, 2, 2] - mat[:, 2, 1] * mat[:, 1, 2]) \
+        - mat[:, 0, 1] * (mat[:, 1, 0] * mat[:, 2, 2] - mat[:, 1, 2] * mat[:, 2, 0]) \
+        + mat[:, 0, 2] * (mat[:, 1, 0] * mat[:, 2, 1] -
+                          mat[:, 1, 1] * mat[:, 2, 0])
+    return det
+
+
 def cat_grid_z(grid, fill_value: int = 1):
     """concat z axis of grid at last dim , return shape (B, H, W, 3)"""
     return torch.cat([grid, torch.full_like(grid[..., 0:1], fill_value)], dim=-1)
@@ -29,19 +85,19 @@ class LinearizedMutilSample():
 
     @classmethod
     def create_auxiliary_grid(cls, grid, inputsize):
-        grid = grid.unsqueeze(1)
-        other_grid = grid.repeat(1, cls.num_grid-1, 1, 1, 1)
+        grid = grid.unsqueeze(1).repeat(1, cls.num_grid, 1, 1, 1)
 
-        WH = grid.new_tensor([grid.size(-2), grid.size(-3)])
-        grid_noise = torch.randn_like(other_grid) / WH * cls.noise_strength
+        WH = grid.new_tensor([[grid.size(-2), grid.size(-3)]])
+        grid_noise = torch.randn_like(grid[:, 1:]) / WH * cls.noise_strength
+        grid[:, 1:] += grid_noise
 
         if cls.need_push_away:
-            inputH, inputW = inputsize[-2:]
-            least_offset = grid.new_tensor([2.0/inputW, 2.0/inputH])
-            grid_noise += torch.randn_like(other_grid) * least_offset
+            input_H, input_W = inputsize[-2:]
+            least_offset = grid.new_tensor([2.0 / input_W, 2.0 / input_H])
+            noise = torch.randn_like(grid[:, 1:]) * least_offset
+            grid[:, 1:] += noise
 
-        # grid_noise = grid_noise.clamp_(min=-1, max=1)
-        return torch.cat([grid, other_grid+grid_noise], dim=1)
+        return grid
 
     @classmethod
     def warp_input(cls, input, auxiliary_grid, padding_mode='zeros'):
@@ -57,8 +113,7 @@ class LinearizedMutilSample():
 
     @classmethod
     def linearized_fitting(cls, warped_input, auxiliary_grid):
-        assert auxiliary_grid.size(
-            1) > 1, 'num of grid should be larger than 1'
+        assert warped_input.size(1) > 1, 'num of grid should be larger than 1'
         assert warped_input.dim() == 5, 'shape should be: B x Grid x C x H x W'
         assert auxiliary_grid.dim() == 5, 'shape should be: B x Grid x H x W x XY'
         assert warped_input.size(1) == auxiliary_grid.size(1)
@@ -75,7 +130,7 @@ class LinearizedMutilSample():
         x = cat_grid_z(delta_grid).permute(0, 2, 3, 4, 1)
         # calculate dI/dX, euqation(7) in paper
         xTx = x.matmul(x.transpose(3, 4))  # [B, H, W, XY1, XY1]
-        xTx_inv = xTx.view(-1, 3, 3).inverse().view_as(xTx)
+        xTx_inv = mat_3x3_inv(xTx.view(-1, 3, 3)).view_as(xTx)
         xTx_inv_xT = xTx_inv.matmul(x)  # [B, H, W, XY1, Grid-1]
 
         # prevent manifestation from out-of-bound samples mentioned in section 6.1 of paper
@@ -88,15 +143,15 @@ class LinearizedMutilSample():
         # gradient_intensity shape: [B, H, W, XY1, C]
         gradient_intensity = xTx_inv_xT.matmul(delta_intensity)
 
-        # stop gradient shape: [B, C, H, W, XY1]
-        gradient_intensity = gradient_intensity.permute(0, 4, 1, 2, 3).detach()
+        # stop gradient shape: [B, H, W, C, XY1]
+        gradient_intensity = gradient_intensity.detach().transpose(3, 4)
 
         # center_grid shape: [B, H, W, XY1]
         grid_xyz_stop = cat_grid_z(center_grid.detach(), int(cls.fixed_bias))
         gradient_grid = cat_grid_z(center_grid) - grid_xyz_stop
 
         # map to linearized, equation(2) in paper
-        return center_image + gradient_intensity.mul(gradient_grid.unsqueeze(1)).sum(-1)
+        return center_image + gradient_intensity.matmul(gradient_grid.unsqueeze(-1)).squeeze(-1).permute(0, 3, 1, 2)
 
     @classmethod
     def apply(cls, input, grid, padding_mode='zeros'):
