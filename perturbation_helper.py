@@ -4,6 +4,7 @@ modified from: https://github.com/chenhsuanlin/inverse-compositional-STN
 """
 import numpy as np
 import torch
+from torch import stack
 
 
 def gen_perturbation_vec(opt, num_pert: int):
@@ -85,7 +86,7 @@ def gen_pert_for_translation(opt, num_pert):
     tx = gen_random_translation(opt, num_pert)
     ty = gen_random_translation(opt, num_pert)
     # make it a torch vector
-    perturbation_vec = torch.stack([tx, ty], dim=-1)
+    perturbation_vec = stack([tx, ty], dim=-1)
     return perturbation_vec
 
 
@@ -94,7 +95,7 @@ def gen_pert_for_trans_rot(opt, num_pert):
     tx = gen_random_translation(opt, num_pert)
     ty = gen_random_translation(opt, num_pert)
     # make it a torch vector
-    perturbation_vec = torch.stack([theta, tx, ty], dim=-1)
+    perturbation_vec = stack([theta, tx, ty], dim=-1)
     return perturbation_vec
 
 
@@ -104,7 +105,7 @@ def gen_pert_for_similarity(opt, num_pert):
     tx = gen_random_translation(opt, num_pert)
     ty = gen_random_translation(opt, num_pert)
     # make it a torch vector
-    perturbation_vec = torch.stack([theta, s, tx, ty], dim=-1)
+    perturbation_vec = stack([theta, s, tx, ty], dim=-1)
     return perturbation_vec
 
 
@@ -126,21 +127,21 @@ def vec2mat(vec):
 
     if vec.size(1) == 2:  # "translation"
         tx, ty = torch.unbind(vec, dim=1)
-        transformation_mat = torch.stack([torch.stack([I, O, tx], dim=-1),
-                                          torch.stack([O, I, ty], dim=-1)], dim=1)
+        transformation_mat = stack([stack([I, O, tx], dim=-1),
+                                    stack([O, I, ty], dim=-1)], dim=1)
     elif vec.size(1) == 3:  # trans_rot
         theta, tx, ty = vec.unbind(dim=1)
         cos, sin = torch.cos(theta), torch.sin(theta)
-        transformation_mat = torch.stack([torch.stack([cos, -sin, tx], dim=-1),
-                                          torch.stack([sin,  cos, ty], dim=-1)], dim=1)
+        transformation_mat = stack([stack([cos, -sin, tx], dim=-1),
+                                    stack([sin,  cos, ty], dim=-1)], dim=1)
     elif vec.size(1) == 4:  # "similarity"
         pc, ps, tx, ty = torch.unbind(vec, dim=1)
-        transformation_mat = torch.stack([torch.stack([pc, -ps, tx], dim=-1),
-                                          torch.stack([ps,  pc, ty], dim=-1)], dim=1)
+        transformation_mat = stack([stack([pc, -ps, tx], dim=-1),
+                                    stack([ps,  pc, ty], dim=-1)], dim=1)
     elif vec.size(1) == 6:  # "affine"
         p1, p2, tx, p4, p5, ty = torch.unbind(vec, dim=1)
-        transformation_mat = torch.stack([torch.stack([p1, p2, tx], dim=-1),
-                                          torch.stack([p4, p5, ty], dim=-1)], dim=1)
+        transformation_mat = stack([stack([p1, p2, tx], dim=-1),
+                                    stack([p4, p5, ty], dim=-1)], dim=1)
     elif vec.size(1) == 8:  # "homography"
         vec = torch.cat([vec, O.unsqueeze(0)], dim=-1)
         transformation_mat = vec.view(-1, 3, 3)
@@ -156,13 +157,31 @@ def mat2vec(mat, warpType):
     e10, e11, e12 = row1.unbind(dim=1)
     e20, e21,   _ = row2.unbind(dim=1)
     if warpType == "translation":
-        p = torch.stack([e02, e12], dim=1)
+        p = stack([e02, e12], dim=1)
     elif warpType == "similarity":
-        p = torch.stack([e00, e10, e02, e12], dim=1)
+        p = stack([e00, e10, e02, e12], dim=1)
     elif warpType == "affine":
-        p = torch.stack([e00, e01, e02, e10, e11, e12], dim=1)
+        p = stack([e00, e01, e02, e10, e11, e12], dim=1)
     elif warpType == "homography":
-        p = torch.stack([e00, e01, e02, e10, e11, e12, e20, e21], dim=1)
+        p = stack([e00, e01, e02, e10, e11, e12, e20, e21], dim=1)
     else:
         raise NotImplementedError('unknown warping method')
     return p
+
+
+def compose(p, dp, warpType):
+    """compute composition of warp parameters"""
+    pMtrx = vec2mat(p)
+    dpMtrx = vec2mat(dp)
+    pMtrxNew = dpMtrx.bmm(pMtrx)
+    pMtrxNew = pMtrxNew / pMtrxNew[:, 2:3, 2:3]
+    pNew = mat2vec(pMtrxNew, warpType)
+    return pNew
+
+
+def inverse(p, warpType):
+    """compute inverse of warp parameters"""
+    pMtrx = vec2mat(p)
+    pInvMtrx = pMtrx.inverse()
+    pInv = mat2vec(pInvMtrx, warpType)
+    return pInv

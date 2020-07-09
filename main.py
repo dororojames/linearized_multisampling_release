@@ -11,8 +11,8 @@ if __name__ == "__main__":
     cute_cat = utils.loadimage(image_path).unsqueeze(0)
     print(cute_cat.shape)
 
-    trans_mat = torch.FloatTensor([[[0.6705,  0.4691, -0.1369],
-                                    [-0.4691,  0.6705, -0.0432]]])
+    trans_mat = torch.Tensor([[[0.6705,  0.4691, -0.1369],
+                               [-0.4691,  0.6705, -0.0432]]])
     out_shape = [128, 128]
 
     bilinear_sampler = sampler.Sampler('bilinear', 'zeros')
