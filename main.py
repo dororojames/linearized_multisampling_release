@@ -21,6 +21,12 @@ if __name__ == "__main__":
     # save_image(bilinear_tarnsformed, 'bilinear_transformed.png')
     # utils.showimg(bilinear_tarnsformed)
 
+    bicubic_sampler = sampler.Sampler('bicubic', 'zeros')
+    bicubic_tarnsformed = bilinear_sampler.warp_image(
+        cute_cat, trans_mat, out_shape=out_shape)
+    # save_image(bicubic_tarnsformed, 'bicubic_transformed.png')
+    # utils.showimg(bicubic_tarnsformed)
+
     # utils.torchseed(666)
     # linearized_sampler_o = sampler_o.Sampler('linearized', 'zeros')
     # linearized_tarnsformed_o = linearized_sampler_o.warp_image(
@@ -46,6 +52,7 @@ if __name__ == "__main__":
 
     visualizer = GradientVisualizer(input=cute_cat, out_shape=[16, 16])
     visualizer.draw_gradient_grid(bilinear_sampler)
+    visualizer.draw_gradient_grid(bicubic_sampler)
     # utils.torchseed(666)
     # visualizer.draw_gradient_grid(linearized_sampler_o, 'linearized_ori')
     utils.torchseed(666)

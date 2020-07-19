@@ -2,6 +2,17 @@ import torch
 import torch.nn.functional as F
 
 
+def getWH(input):
+    """Get [W, H] tensor from input"""
+    H, W = input.size()[-2:]
+    return input.new_tensor([W, H])
+
+
+def center_of(input):
+    """return [(W-1)/2, (H-1)/2] tensor of input img"""
+    return input.new_tensor(input.size()[:1:-1]).sub_(1).div_(2)
+
+
 def det3x3(mat):
     """calculate the determinant of a 3x3 matrix, support batch."""
     M = mat.reshape(-1, 3, 3).permute(1, 2, 0)
@@ -166,16 +177,82 @@ def linearized_grid_sample(input, grid, padding_mode='zeros', align_corners=Fals
     return LinearizedMutilSample.apply(input, grid, padding_mode, align_corners)
 
 
+def index_select(input, index, index_mode='coord', select_mode='bilinear'):
+    """index select
+
+    Args:
+        input: shape(B, C, H, W) or (B, C, D, H, W)
+        index: shape(B, K, 2) or (B, K, 3)
+        index_mode (str): 'coord' | 'position'. Default: 'coord'
+        select_mode (str): sample mode for gridsample
+            'bilinear' | 'linearized' | 'nearest'. Default: 'bilinear'
+
+    Returns:
+        selected items: shape(B, K, C)
+    """
+    if index_mode == 'coord':
+        grid = index
+    elif index_mode == 'position':
+        grid = index/center_of(input) - 1
+
+    if grid.min() < -1 or grid.max() > 1:
+        raise IndexError("index out of range")
+
+    view_shape = grid.size()[:2] + (1,)*(input.dim()-3) + grid.size()[-1:]
+    selected = F.grid_sample(input, grid.view(view_shape), mode=select_mode,
+                             padding_mode='zeros', align_corners=True)
+    return selected.view(selected.size()[:3]).transpose(-1, -2)
+
+
+def u(s, a=-0.75):
+    s = s.abs()
+    s2, s3 = s**2, s**3
+    l1 = (a+2)*s3 - (a+3)*s2 + 1
+    l2 = a*s3 - (5*a)*s2 + (8*a)*s - 4*a
+    return torch.where(s <= 1, l1, l2)
+
+
+def bicubic_grid_sample(input, grid, padding_mode='zeros', align_corners=False):
+    """bicubic_grid_sample"""
+    kernel_size = 4
+    if not align_corners:
+        grid = grid * getWH(input) / getWH(input).sub_(1)
+    abs_loc = (grid + 1) * center_of(input) + kernel_size//2
+
+    padding_mode = {'border': 'replicate', 'zeros': 'constant'}[padding_mode]
+    input = F.pad(input, (kernel_size//2,)*4, padding_mode)
+
+    locs = abs_loc.floor().unsqueeze(-1) + grid.new_tensor([-1, 0, 1, 2])
+    with torch.no_grad():
+        B, _, H, W = input.size()
+        loc_w, loc_h = locs.flatten(0, 2).unbind(dim=-2)
+        loc_w = loc_w.reshape(-1, 1, kernel_size).expand(-1, kernel_size, -1)
+        loc_h = loc_h.reshape(-1, kernel_size, 1).expand(-1, -1, kernel_size)
+        loc_grid = torch.stack([loc_w.clamp(0, W-1), loc_h.clamp(0, H-1)], -1)
+
+    patch = index_select(input, loc_grid.reshape(B, -1, 2).detach(),
+                         index_mode='position', select_mode='nearest')
+    patch = patch.reshape(grid.size()[:3]+(kernel_size, kernel_size, -1))
+
+    mat_r, mat_l = u(abs_loc.unsqueeze(-1) - locs).unbind(dim=-2)
+    output = torch.einsum('bhwl,bhwlrc,bhwr->bchw', mat_l, patch, mat_r)
+    return output
+
+
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=False):
     """
     original function prototype:
     torch.nn.functional.grid_sample(
         input, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
     copy from pytorch 1.3.0 source code
-    add linearized_grid_sample
+    add linearized_grid_sample and bicubic_grid_sample
     """
     if mode == 'linearized':
+        assert input.dim() == grid.dim() == 4
         return LinearizedMutilSample.apply(input, grid, padding_mode, align_corners)
+    if mode == 'bicubic':
+        assert input.dim() == grid.dim() == 4
+        return bicubic_grid_sample(input, grid, padding_mode, align_corners)
     else:
         return F.grid_sample(input, grid, mode, padding_mode, align_corners)
 
